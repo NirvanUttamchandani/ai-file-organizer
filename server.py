@@ -3,23 +3,21 @@ import json
 import shutil
 import time
 from pathlib import Path
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import logging
 import google.generativeai as genai
 
 # --- Basic Setup ---
 load_dotenv()
-app = Flask(__name__, template_folder='.')
+app = Flask(__name__) # Removed template_folder since it's not needed
 logging.basicConfig(level=logging.INFO)
 MOVE_LOG_FILE = "move_log.json"
 
 # --- Configure Google Gemini Client ---
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    # --- UPDATED: Using the new, more reliable model name ---
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    # --- END UPDATE ---
 except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
     model = None
@@ -140,9 +138,12 @@ def execute_move_plan(base_folder, move_plan):
         return {"success": False, "message": str(e)}
 
 # --- API Routes ---
+
+# --- UPDATED: This route now returns a simple JSON status message ---
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return jsonify({"status": "ok", "message": "AI Organizer Backend is running."})
+# --- END UPDATE ---
 
 @app.route('/api/get-structure', methods=['POST'])
 def get_structure_route():
