@@ -16,12 +16,10 @@ MOVE_LOG_FILE = "move_log.json"
 
 # --- Configure Google Gemini Client ---
 try:
-    # On Render, the API key will be an environment variable
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable not set.")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-pro')
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+    # --- UPDATED: Using the new, more reliable model name ---
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # --- END UPDATE ---
 except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
     model = None
@@ -114,43 +112,96 @@ def get_ai_structure(files_info, user_prompt):
 
 def execute_move_plan(base_folder, move_plan):
     """Executes the file moves and logs them for rollback."""
-    # This function is designed for a desktop app and will not work on a web server.
-    # The logic remains as a reference for the desktop version of the app.
-    return {"success": False, "message": "File moving is a desktop-only feature and is disabled on the web server."}
-
+    log_for_rollback = []
+    try:
+        if os.path.exists(MOVE_LOG_FILE):
+            os.remove(MOVE_LOG_FILE)
+        for move in move_plan:
+            source_path = Path(move['source'])
+            if not source_path.exists():
+                logging.warning(f"Source file not found, skipping: {source_path}")
+                continue
+            dest_path = Path(base_folder) / Path(move['destination'])
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(source_path, dest_path)
+            log_for_rollback.append({"from": str(source_path), "to": str(dest_path)})
+        with open(MOVE_LOG_FILE, 'w') as f:
+            json.dump(log_for_rollback, f, indent=4)
+        return {"success": True, "message": "Files organized successfully!", "log": log_for_rollback}
+    except Exception as e:
+        logging.error(f"Error executing move plan: {e}")
+        # Auto-rollback on failure
+        if log_for_rollback:
+            for item in reversed(log_for_rollback):
+                try:
+                    shutil.move(item['to'], item['from'])
+                except Exception as rollback_e:
+                    logging.error(f"Critical error: Failed to auto-rollback during failed move: {rollback_e}")
+        return {"success": False, "message": str(e)}
 
 # --- API Routes ---
 @app.route('/')
 def index():
-    # Note: The web version is a demo. The core value is the API.
-    return "<h1>AI File Organizer API</h1><p>This server provides the AI logic for the file organizer application. The file scanning and moving functionality is intended for the desktop client.</p>"
+    return render_template('index.html')
 
 @app.route('/api/get-structure', methods=['POST'])
 def get_structure_route():
     data = request.json
-    # In a real web app, you'd get the file list from the request, not by scanning a local path.
-    files_info_from_client = data.get('files_info')
+    folder_path = data.get('folder_path')
     user_prompt = data.get('prompt', '')
-
-    if not files_info_from_client:
-        return jsonify({"error": "No file information provided."}), 400
-
-    proposed_structure = get_ai_structure(files_info_from_client, user_prompt)
+    if not folder_path or not os.path.isdir(folder_path):
+        return jsonify({"error": "Invalid folder path provided."}), 400
+    files_info = scan_folder_contents(folder_path)
+    if not files_info:
+        return jsonify({"error": "No files found in the selected folder."}), 400
+    proposed_structure = get_ai_structure(files_info, user_prompt)
     if "error" in proposed_structure:
         return jsonify(proposed_structure), 500
     return jsonify(proposed_structure)
 
-# The execute and rollback routes are disabled as they don't apply to a web server environment.
-# They manipulate a local file system, which doesn't exist in the same way here.
 @app.route('/api/execute-moves', methods=['POST'])
 def execute_moves_route():
-    return jsonify({"success": False, "message": "This operation is not supported on the web server."}), 403
+    data = request.json
+    base_folder = data.get('base_folder')
+    move_plan = data.get('move_plan')
+    if not all([base_folder, move_plan]):
+        return jsonify({"error": "Missing base_folder or move_plan."}), 400
+    result = execute_move_plan(base_folder, move_plan)
+    return jsonify(result)
 
 @app.route('/api/rollback', methods=['POST'])
 def rollback_route():
-    return jsonify({"success": False, "message": "This operation is not supported on the web server."}), 403
+    if not os.path.exists(MOVE_LOG_FILE):
+        return jsonify({"success": False, "message": "No rollback log found."}), 404
+    try:
+        with open(MOVE_LOG_FILE, 'r') as f:
+            log = json.load(f)
+        
+        created_dirs = set()
+        for move in reversed(log):
+            source_path = Path(move['to'])
+            dest_path = Path(move['from'])
+            
+            created_dirs.add(source_path.parent)
+            
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(source_path, dest_path)
+        
+        # After moving files, attempt to clean up empty directories
+        for directory in sorted(list(created_dirs), key=lambda p: len(str(p)), reverse=True):
+            try:
+                if not os.listdir(directory):
+                    os.rmdir(directory)
+                    logging.info(f"Removed empty directory: {directory}")
+            except OSError as e:
+                logging.warning(f"Could not remove directory {directory}: {e}")
+
+        os.remove(MOVE_LOG_FILE)
+        return jsonify({"success": True, "message": "Rollback successful!"})
+    except Exception as e:
+        logging.error(f"Error during rollback: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 if __name__ == '__main__':
-    # This part is for local development only. Render will use Gunicorn to run the app.
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=True)
 
