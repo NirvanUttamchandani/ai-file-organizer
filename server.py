@@ -17,13 +17,14 @@ MOVE_LOG_FILE = "move_log.json"
 # --- Configure Google Gemini Client ---
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # --- UPDATED: Switched to the more stable 'gemini-pro' model ---
+    model = genai.GenerativeModel('gemini-pro')
+    # --- END UPDATE ---
 except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
     model = None
 
-# --- This function is now only used for the local desktop app ---
-# --- It's no longer used by the cloud server itself ---
+# --- Core Functions ---
 def scan_folder_contents(folder_path):
     """Scans a folder and returns a list of file paths and basic info."""
     files_info = []
@@ -143,11 +144,10 @@ def execute_move_plan(base_folder, move_plan):
 def index():
     return jsonify({"status": "ok", "message": "AI Organizer Backend is running."})
 
-# --- UPDATED: This route now accepts a file list directly ---
 @app.route('/api/get-structure', methods=['POST'])
 def get_structure_route():
     data = request.json
-    files_info = data.get('files_info') # Expects a list of files
+    files_info = data.get('files_info')
     user_prompt = data.get('prompt', '')
 
     if not files_info:
@@ -157,7 +157,6 @@ def get_structure_route():
     if "error" in proposed_structure:
         return jsonify(proposed_structure), 500
     return jsonify(proposed_structure)
-# --- END UPDATE ---
 
 @app.route('/api/execute-moves', methods=['POST'])
 def execute_moves_route():
@@ -204,4 +203,3 @@ def rollback_route():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
-
