@@ -22,7 +22,8 @@ except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
     model = None
 
-# --- Core Functions ---
+# --- This function is now only used for the local desktop app ---
+# --- It's no longer used by the cloud server itself ---
 def scan_folder_contents(folder_path):
     """Scans a folder and returns a list of file paths and basic info."""
     files_info = []
@@ -138,27 +139,25 @@ def execute_move_plan(base_folder, move_plan):
         return {"success": False, "message": str(e)}
 
 # --- API Routes ---
-
-# --- UPDATED: This route now returns a simple JSON status message ---
 @app.route('/')
 def index():
     return jsonify({"status": "ok", "message": "AI Organizer Backend is running."})
-# --- END UPDATE ---
 
+# --- UPDATED: This route now accepts a file list directly ---
 @app.route('/api/get-structure', methods=['POST'])
 def get_structure_route():
     data = request.json
-    folder_path = data.get('folder_path')
+    files_info = data.get('files_info') # Expects a list of files
     user_prompt = data.get('prompt', '')
-    if not folder_path or not os.path.isdir(folder_path):
-        return jsonify({"error": "Invalid folder path provided."}), 400
-    files_info = scan_folder_contents(folder_path)
+
     if not files_info:
-        return jsonify({"error": "No files found in the selected folder."}), 400
+        return jsonify({"error": "No files info provided."}), 400
+    
     proposed_structure = get_ai_structure(files_info, user_prompt)
     if "error" in proposed_structure:
         return jsonify(proposed_structure), 500
     return jsonify(proposed_structure)
+# --- END UPDATE ---
 
 @app.route('/api/execute-moves', methods=['POST'])
 def execute_moves_route():
