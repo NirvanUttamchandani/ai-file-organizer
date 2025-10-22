@@ -18,7 +18,7 @@ MOVE_LOG_FILE = "move_log.json"
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
     # --- UPDATED: Switched to the more stable 'gemini-pro' model ---
-    model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+    model = genai.GenerativeModel('gemini-2.5-pro')
     # --- END UPDATE ---
 except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
