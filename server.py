@@ -17,81 +17,66 @@ MOVE_LOG_FILE = "move_log.json"
 # --- Configure Google Gemini Client ---
 try:
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    # --- UPDATED: Switched to the more stable 'gemini-pro' model ---
+    # --- UPDATED: Switched to the more powerful 'gemini-2.5-pro' model ---
     model = genai.GenerativeModel('gemini-2.5-pro')
     # --- END UPDATE ---
 except Exception as e:
     logging.error(f"Failed to configure Google Gemini: {e}")
     model = None
 
-# --- Core Functions ---
+# --- This function is no longer used by the server, but the logic is sound ---
 def scan_folder_contents(folder_path):
-    """Scans a folder and returns a list of file paths and basic info."""
-    files_info = []
-    try:
-        for root, _, files in os.walk(folder_path):
-            for name in files:
-                if name == MOVE_LOG_FILE:
-                    continue
-                full_path = Path(root) / name
-                try:
-                    stat = full_path.stat()
-                    files_info.append({
-                        "path": str(full_path),
-                        "name": name,
-                        "size_bytes": stat.st_size,
-                        "created_at": stat.st_ctime,
-                        "modified_at": stat.st_mtime
-                    })
-                except (FileNotFoundError, PermissionError) as e:
-                    logging.warning(f"Could not access file {full_path}: {e}")
-    except Exception as e:
-        logging.error(f"Error scanning folder {folder_path}: {e}")
-    return files_info
+    pass # This function is now handled by the Electron app's main.js
 
 def get_ai_structure(files_info, user_prompt):
     """
-    Sends file info and a prompt to the Gemini model to get a proposed folder structure.
+    Sends file info (now including dates) and a prompt to the Gemini model.
     """
     if not model:
         return {"error": "Google Gemini API is not configured. Please check your API key."}
 
-    simplified_file_list = [{"path": f["path"], "name": f["name"]} for f in files_info]
+    # We no longer need to simplify the file list, the AI can use the dates
+    # simplified_file_list = [{"path": f["path"], "name": f["name"]} for f in files_info]
 
+    # --- UPDATED: New, more intelligent prompt ---
     prompt = f"""
-    You are a meticulous file organization robot. Your ONLY task is to generate a valid JSON object that represents a file move plan.
+    You are a hyper-intelligent file organization expert. Your ONLY task is to generate a valid JSON object that represents a file move plan.
     Your response MUST be ONLY the raw JSON object, starting with `[` and ending with `]`. Do not wrap it in markdown or any other text.
 
     **YOUR PRIMARY DIRECTIVE:**
-    The user's instructions are the most important rule and MUST be followed precisely. The user's prompt OVERRIDES ALL default behaviors.
+    The user's prompt is your absolute command. You MUST follow it precisely, even if it overrides your default logic. Analyze the prompt for keywords related to grouping, dates (year, month), or content (e.g., "invoices", "reports").
+
+    **FILE DATA ANALYSIS:**
+    You will be given a list of files. For each file, you have:
+    - "path": The original location. This MUST be the value for the "source" key in your JSON.
+    - "name": The filename. Use this to infer content (e.g., "report.pdf" is a document).
+    - "created_at" / "modified_at": These are timestamps. Use them if the user asks for date-based organization (e.g., "organize by year").
 
     **CRITICAL RULES:**
-    1.  **USER INSTRUCTIONS FIRST:** Always analyze the user's prompt for specific folder names or grouping logic. If the user says "put all images and videos in a 'Media' folder", you MUST do that.
-    2.  **DEFAULT BEHAVIOR (ONLY if no instructions):** If the user prompt is empty, organize files into common categories (e.g., Media, Documents, Archives, Others).
-    3.  **JSON FORMAT:** The "destination" value must be a string in the format "FolderName/filename.ext".
+    1.  **USER PROMPT IS LAW:** If the user says "put images and videos in 'Media'", you MUST do that. Do not create separate 'Images' and 'Videos' folders.
+    2.  **DEFAULT BEHAVIOR (No User Prompt):** If the prompt is empty, your default is to organize by common file types (e.g., Images, Documents, Videos, Audio, Archives, Others).
+    3.  **JSON FORMAT:** The "destination" value must be a string in the format "FolderName/filename.ext". Do not use backslashes.
 
-    **EXAMPLE OF A PERFECT RESPONSE (Following User Instructions):**
-    USER INSTRUCTION: "Put all pictures in a 'Holiday Snaps' folder and everything else in 'Miscellaneous'."
+    **EXAMPLE (Date-based organization):**
+    USER INSTRUCTION: "Organize my files by the year they were modified."
+    FILE: {{ "path": "C:/path/doc.pdf", "name": "doc.pdf", "modified_at": 1678886400000 }}
     JSON RESPONSE:
     [
       {{
-        "source": "C:/Users/Test/Downloads/photo.jpg",
-        "destination": "Holiday Snaps/photo.jpg"
-      }},
-      {{
-        "source": "C:/Users/Test/Downloads/report.pdf",
-        "destination": "Miscellaneous/report.pdf"
+        "source": "C:/path/doc.pdf",
+        "destination": "2023/doc.pdf"
       }}
     ]
 
     ---
     Now, based on the following file list and user instructions, generate the JSON move plan.
-    File list: {json.dumps(simplified_file_list, indent=2)}
+    File list: {json.dumps(files_info, indent=2)}
     User Instructions: "{user_prompt if user_prompt else 'Organize by file type.'}"
     """
+    # --- END UPDATE ---
 
     try:
-        logging.info("Sending request to Google Gemini API...")
+        logging.info("Sending request to Google Gemini API (gemini-2.5-pro)...")
         response = model.generate_content(prompt)
         response_text = response.text
         
@@ -110,39 +95,14 @@ def get_ai_structure(files_info, user_prompt):
         logging.error(f"An error occurred with the Google Gemini API call: {e}")
         return {"error": str(e)}
 
+# --- This function is no longer used by the server, but the logic is sound ---
 def execute_move_plan(base_folder, move_plan):
-    """Executes the file moves and logs them for rollback."""
-    log_for_rollback = []
-    try:
-        if os.path.exists(MOVE_LOG_FILE):
-            os.remove(MOVE_LOG_FILE)
-        for move in move_plan:
-            source_path = Path(move['source'])
-            if not source_path.exists():
-                logging.warning(f"Source file not found, skipping: {source_path}")
-                continue
-            dest_path = Path(base_folder) / Path(move['destination'])
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(source_path, dest_path)
-            log_for_rollback.append({"from": str(source_path), "to": str(dest_path)})
-        with open(MOVE_LOG_FILE, 'w') as f:
-            json.dump(log_for_rollback, f, indent=4)
-        return {"success": True, "message": "Files organized successfully!", "log": log_for_rollback}
-    except Exception as e:
-        logging.error(f"Error executing move plan: {e}")
-        # Auto-rollback on failure
-        if log_for_rollback:
-            for item in reversed(log_for_rollback):
-                try:
-                    shutil.move(item['to'], item['from'])
-                except Exception as rollback_e:
-                    logging.error(f"Critical error: Failed to auto-rollback during failed move: {rollback_e}")
-        return {"success": False, "message": str(e)}
+    pass # This function is now handled by the Electron app's main.js
 
 # --- API Routes ---
 @app.route('/')
 def index():
-    return jsonify({"status": "ok", "message": "AI Organizer Backend is running."})
+    return jsonify({"status": "ok", "message": "AI Organizer Backend (gemini-2.5-pro) is running."})
 
 @app.route('/api/get-structure', methods=['POST'])
 def get_structure_route():
@@ -158,48 +118,14 @@ def get_structure_route():
         return jsonify(proposed_structure), 500
     return jsonify(proposed_structure)
 
+# --- These routes are no longer used by the Electron app but are harmless to keep ---
 @app.route('/api/execute-moves', methods=['POST'])
 def execute_moves_route():
-    data = request.json
-    base_folder = data.get('base_folder')
-    move_plan = data.get('move_plan')
-    if not all([base_folder, move_plan]):
-        return jsonify({"error": "Missing base_folder or move_plan."}), 400
-    result = execute_move_plan(base_folder, move_plan)
-    return jsonify(result)
+    return jsonify({"error": "This endpoint is deprecated. Execute moves on the client."}), 404
 
 @app.route('/api/rollback', methods=['POST'])
 def rollback_route():
-    if not os.path.exists(MOVE_LOG_FILE):
-        return jsonify({"success": False, "message": "No rollback log found."}), 404
-    try:
-        with open(MOVE_LOG_FILE, 'r') as f:
-            log = json.load(f)
-        
-        created_dirs = set()
-        for move in reversed(log):
-            source_path = Path(move['to'])
-            dest_path = Path(move['from'])
-            
-            created_dirs.add(source_path.parent)
-            
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(source_path, dest_path)
-        
-        # After moving files, attempt to clean up empty directories
-        for directory in sorted(list(created_dirs), key=lambda p: len(str(p)), reverse=True):
-            try:
-                if not os.listdir(directory):
-                    os.rmdir(directory)
-                    logging.info(f"Removed empty directory: {directory}")
-            except OSError as e:
-                logging.warning(f"Could not remove directory {directory}: {e}")
-
-        os.remove(MOVE_LOG_FILE)
-        return jsonify({"success": True, "message": "Rollback successful!"})
-    except Exception as e:
-        logging.error(f"Error during rollback: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+    return jsonify({"error": "This endpoint is deprecated. Rollback on the client."}), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
